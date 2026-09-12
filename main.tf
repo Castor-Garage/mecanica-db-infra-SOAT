@@ -91,7 +91,11 @@ resource "aws_db_instance" "this" {
 }
 
 locals {
-  database_url = "postgresql://${var.db_username}:${random_password.master.result}@${aws_db_instance.this.address}:5432/${var.db_name}?sslmode=require"
+  # uselibpqcompat=true: sslmode=require sozinho passou a exigir verificacao
+  # de CA em versoes recentes do driver pg/Prisma; isso volta ao
+  # comportamento tradicional do libpq (criptografa sem verificar a CA,
+  # suficiente para o RDS aqui - certificado autoassinado da AWS)
+  database_url = "postgresql://${var.db_username}:${random_password.master.result}@${aws_db_instance.this.address}:5432/${var.db_name}?sslmode=require&uselibpqcompat=true"
 }
 
 resource "aws_ssm_parameter" "database_url" {
