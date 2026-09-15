@@ -50,3 +50,9 @@ variable "operator_cidr" {
   type        = string
   default     = ""
 }
+
+variable "staging_db_name" {
+  description = "Nome do database Postgres de staging dentro da mesma instância RDS."
+  type        = string
+  default     = "mecanica_db_staging"
+}

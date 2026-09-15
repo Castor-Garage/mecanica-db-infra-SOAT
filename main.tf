@@ -105,3 +105,16 @@ resource "aws_ssm_parameter" "database_url" {
   value       = local.database_url
   overwrite   = true
 }
+
+locals {
+  # database_url_staging: mesma instância RDS, database separado para staging
+  database_url_staging = "postgresql://${var.db_username}:${random_password.master.result}@${aws_db_instance.this.address}:5432/${var.staging_db_name}?sslmode=require&uselibpqcompat=true"
+}
+
+resource "aws_ssm_parameter" "database_url_staging" {
+  name        = "/castor-garage/database-url-staging"
+  description = "Connection string do database de staging (mesma instância RDS, database separado). O database em si é criado via Job Kubernetes no deploy de staging (mecanica-pos-SOAT/k8s/jobs/create-staging-db.yaml) — este Terraform só compõe a string."
+  type        = "SecureString"
+  value       = local.database_url_staging
+  overwrite   = true
+}
