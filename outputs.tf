@@ -17,3 +17,8 @@ output "security_group_id" {
   description = "Security group do RDS (para liberar acesso de outros repos - EKS/Lambda)"
   value       = aws_security_group.rds.id
 }
+
+output "ssm_parameter_name_staging" {
+  description = "Nome do parametro SSM com a DATABASE_URL de staging"
+  value       = aws_ssm_parameter.database_url_staging.name
+}
