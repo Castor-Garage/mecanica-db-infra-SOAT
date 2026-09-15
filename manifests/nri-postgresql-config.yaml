@@ -1,0 +1,19 @@
+# Config do on-host integration nri-postgresql. Sem segredos aqui: os
+# valores entre {{ }} sao resolvidos pelo agente a partir das env vars do
+# container (ver Secret nri-postgresql-credentials, criado via kubectl em
+# main.tf a partir de valores do Terraform - nunca commitado).
+integrations:
+  - name: nri-postgresql
+    env:
+      HOSTNAME: "{{HOSTNAME}}"
+      PORT: "5432"
+      USERNAME: "{{PG_USERNAME}}"
+      PASSWORD: "{{PG_PASSWORD}}"
+      DATABASE: "{{PG_DATABASE}}"
+      COLLECTION_LIST: ALL
+      ENABLE_SSL: "true"
+      TRUST_SERVER_CERTIFICATE: "true"
+    interval: 30s
+    labels:
+      env: production
+      role: postgresql

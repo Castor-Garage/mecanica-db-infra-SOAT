@@ -37,12 +37,36 @@ security group: 5432 liberado para a VPC inteira (uso futuro por EKS/Lambda)
 aws_ssm_parameter "/castor-garage/database-url" (SecureString)
 ```
 
+## Monitoramento (New Relic)
+
+O RDS é um serviço gerenciado da AWS — não há host para instalar um agente
+"dentro" dele. Por isso a métrica é coletada por um pod remoto
+(`nri-postgresql`, imagem `newrelic/infrastructure-bundle`) rodando no
+cluster EKS de
+[`mecanica-k8s-infra-SOAT`](https://github.com/Castor-Garage/mecanica-k8s-infra-SOAT),
+conectando via rede no endpoint do RDS (já liberado no security group para
+toda a VPC). Aplicado por `null_resource.newrelic_postgresql` em `main.tf`,
+que cria/atualiza via `kubectl`:
+
+- `manifests/newrelic-postgresql.yaml` — namespace `newrelic` + Deployment (estático, sem segredo).
+- `manifests/nri-postgresql-config.yaml` — config do integration nri-postgresql, com placeholders `{{ }}` resolvidos a partir de env vars (estático, sem segredo).
+- Secret `nri-postgresql-credentials` — license key + host/usuário/senha do RDS, criado imperativamente com valores do Terraform (nunca commitado).
+
+Verificar depois do apply:
+
+```bash
+terraform output -raw newrelic_check_command | bash
+```
+
 ## Pré-requisitos
 
 - Sessão ativa do AWS Academy Learner Lab (**Start Lab**, credenciais
   temporárias exportadas: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
   `AWS_SESSION_TOKEN`).
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl) — usado pelo
+  `null_resource.newrelic_postgresql` para aplicar o pod de monitoramento no
+  cluster de `mecanica-k8s-infra-SOAT` (precisa já estar provisionado).
 
 ## Carga inicial (migrate + seed) — só a primeira vez
 
@@ -57,6 +81,7 @@ curl -s https://checkip.amazonaws.com
 
 # 2. aplicar liberando esse IP no security group
 export TF_VAR_operator_cidr="<seu-ip>/32"
+export TF_VAR_new_relic_license_key="<sua-license-key-ingest>"
 terraform init
 terraform apply
 
@@ -86,11 +111,13 @@ O pipeline (`.github/workflows/pipeline.yml`) roda `terraform plan` em
 todo PR e `terraform apply` a cada push em `main`, usando os secrets do
 repositório: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 `AWS_SESSION_TOKEN` (sessão temporária do AWS Academy — precisa ser
-atualizada sempre que a sessão do Lab expirar).
+atualizada sempre que a sessão do Lab expirar) e `NEW_RELIC_LICENSE_KEY`
+(License key - INGEST - da conta New Relic, usada pelo pod nri-postgresql).
 
 Manualmente:
 
 ```bash
+export TF_VAR_new_relic_license_key="<sua-license-key-ingest>"
 terraform init
 terraform plan
 terraform apply
@@ -103,11 +130,12 @@ terraform apply
 | `db_endpoint` | host:porta do RDS |
 | `ssm_parameter_name` | `/castor-garage/database-url` — lido pela Lambda e pelo deploy da API principal |
 | `security_group_id` | para liberar acesso de outro security group (ex.: nós do EKS), se no futuro trocarmos o ingress por CIDR por uma referência direta |
+| `newrelic_check_command` | comando `kubectl` para conferir se o pod de monitoramento do RDS está rodando |
 
 ## Destruir
 
 ```bash
-terraform destroy
+terraform destroy -var="new_relic_license_key=<sua-license-key-ingest>"
 ```
 
 Sem `deletion_protection` e com `skip_final_snapshot = true` — não deixa

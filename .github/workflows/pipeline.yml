@@ -41,6 +41,7 @@ jobs:
         run: terraform plan -no-color
         env:
           TF_VAR_operator_cidr: ""
+          TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
 
   apply:
     name: Terraform apply
@@ -60,6 +61,8 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - uses: azure/setup-kubectl@v4
+
       - name: Terraform init
         run: terraform init
 
@@ -68,6 +71,7 @@ jobs:
         env:
           # ver README: fica true so na carga inicial, depois vira false
           TF_VAR_operator_cidr: ""
+          TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
 
       - name: Mostrar endpoint publicado
         run: terraform output db_endpoint

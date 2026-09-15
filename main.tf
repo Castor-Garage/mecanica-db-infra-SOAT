@@ -118,3 +118,55 @@ resource "aws_ssm_parameter" "database_url_staging" {
   value       = local.database_url_staging
   overwrite   = true
 }
+
+# New Relic (monitoramento do RDS) - nao ha agente instalavel dentro do RDS
+# (servico gerenciado), entao a integracao nri-postgresql roda remota, como
+# um pod no cluster EKS de mecanica-k8s-infra-SOAT, conectando via rede no
+# endpoint do RDS (liberado no security group acima para toda a VPC).
+resource "null_resource" "newrelic_postgresql_kubeconfig" {
+  # sempre reroda: cada CI run parte de um runner novo, sem ~/.kube/config -
+  # ver comentario equivalente em mecanica-k8s-infra-SOAT/main.tf.
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = "aws eks update-kubeconfig --name \"${var.eks_cluster_name}\" --region \"${var.aws_region}\" --alias \"${var.eks_cluster_name}\""
+  }
+}
+
+resource "null_resource" "newrelic_postgresql" {
+  depends_on = [aws_db_instance.this, null_resource.newrelic_postgresql_kubeconfig]
+
+  triggers = {
+    manifest_hash = filesha256("${path.module}/manifests/newrelic-postgresql.yaml")
+    config_hash   = filesha256("${path.module}/manifests/nri-postgresql-config.yaml")
+    db_address    = aws_db_instance.this.address
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      set -e
+      CTX="${var.eks_cluster_name}"
+      kubectl --context "$CTX" apply -f "${path.module}/manifests/newrelic-postgresql.yaml"
+
+      kubectl --context "$CTX" -n newrelic create configmap nri-postgresql-config \
+        --from-file=postgresql-config.yml="${path.module}/manifests/nri-postgresql-config.yaml" \
+        --dry-run=client -o yaml | kubectl --context "$CTX" apply -f -
+
+      kubectl --context "$CTX" -n newrelic create secret generic nri-postgresql-credentials \
+        --from-literal=NRIA_LICENSE_KEY="${var.new_relic_license_key}" \
+        --from-literal=NRIA_DISPLAY_NAME="castor-garage-rds" \
+        --from-literal=HOSTNAME="${aws_db_instance.this.address}" \
+        --from-literal=PG_USERNAME="${var.db_username}" \
+        --from-literal=PG_PASSWORD="${random_password.master.result}" \
+        --from-literal=PG_DATABASE="${var.db_name}" \
+        --dry-run=client -o yaml | kubectl --context "$CTX" apply -f -
+
+      kubectl --context "$CTX" -n newrelic rollout restart deployment/nri-postgresql-castor-garage
+      kubectl --context "$CTX" -n newrelic rollout status deployment/nri-postgresql-castor-garage --timeout=120s
+    EOT
+  }
+}
