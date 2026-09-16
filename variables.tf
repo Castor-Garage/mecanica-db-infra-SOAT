@@ -56,3 +56,15 @@ variable "staging_db_name" {
   type        = string
   default     = "mecanica_db_staging"
 }
+
+variable "eks_cluster_name" {
+  description = "Nome do cluster EKS (provisionado em mecanica-k8s-infra-SOAT) onde o pod de monitoramento nri-postgresql e aplicado remotamente."
+  type        = string
+  default     = "castor-garage"
+}
+
+variable "new_relic_license_key" {
+  description = "License key (INGEST - License) da New Relic, usada pelo pod nri-postgresql que monitora este RDS remotamente. Passe via TF_VAR_new_relic_license_key - nunca commitar em texto plano."
+  type        = string
+  sensitive   = true
+}

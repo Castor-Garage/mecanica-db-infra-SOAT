@@ -22,3 +22,8 @@ output "ssm_parameter_name_staging" {
   description = "Nome do parametro SSM com a DATABASE_URL de staging"
   value       = aws_ssm_parameter.database_url_staging.name
 }
+
+output "newrelic_check_command" {
+  description = "Comando para verificar se o pod de monitoramento do RDS (nri-postgresql) esta rodando no cluster EKS"
+  value       = "kubectl --context ${var.eks_cluster_name} -n newrelic get pods -l app=nri-postgresql-castor-garage"
+}

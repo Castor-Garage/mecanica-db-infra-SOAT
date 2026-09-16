@@ -1,0 +1,43 @@
+# Pod remoto (roda no cluster EKS de mecanica-k8s-infra-SOAT) que conecta via
+# rede no RDS deste repositorio e reporta metricas Postgres para a New Relic.
+# Nao ha agente instalavel "dentro" do RDS - e um servico gerenciado da AWS -
+# entao a integracao nri-postgresql roda remota, num pod separado.
+#
+# O Secret nri-postgresql-credentials (license key + host/usuario/senha do
+# RDS) e o ConfigMap nri-postgresql-config (nri-postgresql-config.yaml) sao
+# criados/atualizados via kubectl em main.tf, com valores vindos do Terraform
+# - nao ficam neste manifesto estatico.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: newrelic
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nri-postgresql-castor-garage
+  namespace: newrelic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nri-postgresql-castor-garage
+  template:
+    metadata:
+      labels:
+        app: nri-postgresql-castor-garage
+    spec:
+      containers:
+        - name: newrelic-infra
+          image: newrelic/infrastructure-bundle:latest
+          envFrom:
+            - secretRef:
+                name: nri-postgresql-credentials
+          volumeMounts:
+            - name: nri-postgresql-config
+              mountPath: /etc/newrelic-infra/integrations.d/postgresql-config.yml
+              subPath: postgresql-config.yml
+      volumes:
+        - name: nri-postgresql-config
+          configMap:
+            name: nri-postgresql-config
