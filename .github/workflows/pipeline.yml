@@ -85,5 +85,8 @@ jobs:
           TF_VAR_operator_cidr: ""
           TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
 
-      - name: Mostrar endpoint publicado
-        run: terraform output db_endpoint
+      - name: Mostrar endpoints publicados
+        run: |
+          terraform output db_endpoint
+          terraform output service_db_endpoints
+          terraform output payment_attempts_table_name

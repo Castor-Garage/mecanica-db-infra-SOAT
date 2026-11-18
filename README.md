@@ -1,9 +1,11 @@
-# Castor Garage - DB Infra (RDS PostgreSQL)
+# Castor Garage - DB Infra (RDS PostgreSQL + DynamoDB)
 
-Terraform do banco de dados gerenciado do Tech Challenge Fase 3 (SOAT).
-Repositório 3 dos 4 exigidos pela entrega ("Infraestrutura do Banco de
-Dados Gerenciado (Terraform)"), no lugar do PostgreSQL em cluster usado
-até a Fase 2.
+Terraform dos bancos de dados gerenciados do Tech Challenge (SOAT).
+Criado na Fase 3 como repositório 3 dos 4 exigidos pela entrega
+("Infraestrutura do Banco de Dados Gerenciado (Terraform)"), no lugar do
+PostgreSQL em cluster usado até a Fase 2. Na Fase 4 passou a provisionar
+também os bancos próprios de cada microsserviço (ver
+[Bancos dos microsserviços (Fase 4)](#bancos-dos-microsserviços-fase-4)).
 
 ## Propósito
 
@@ -14,6 +16,11 @@ autenticação](https://github.com/Castor-Garage/mecanica-auth-lambda-SOAT)
 e a [API principal](https://github.com/Castor-Garage/mecanica-pos-SOAT)
 consomem para se conectar ao banco.
 
+Desde a Fase 4, provisiona também um RDS PostgreSQL para o [Billing
+Service](https://github.com/Castor-Garage/mecanica-billing-SOAT), outro
+para o [Execução Service](https://github.com/Castor-Garage/mecanica-execucao-SOAT)
+e uma tabela **DynamoDB** (o banco NoSQL exigido pela fase) para o Billing.
+
 Justificativa completa da escolha (RDS vs banco em cluster) em
 [`docs/rfc/0002-banco-de-dados.md`](https://github.com/Castor-Garage/mecanica-pos-SOAT/blob/main/docs/rfc/0002-banco-de-dados.md)
 e [`docs/adr/0004-rds-vs-banco-em-cluster.md`](https://github.com/Castor-Garage/mecanica-pos-SOAT/blob/main/docs/adr/0004-rds-vs-banco-em-cluster.md)
@@ -21,7 +28,7 @@ no repositório principal.
 
 ## Tecnologias
 
-- Terraform (`aws_db_instance`, `aws_db_subnet_group`, `aws_security_group`, `random_password`, `aws_ssm_parameter`)
+- Terraform (`aws_db_instance`, `aws_db_subnet_group`, `aws_security_group`, `random_password`, `aws_ssm_parameter`, `aws_dynamodb_table`)
 - AWS Academy (Learner Lab): mesma VPC default usada pelo cluster EKS
 
 ## Arquitetura deste repositório
@@ -29,13 +36,60 @@ no repositório principal.
 ```
 aws_db_subnet_group (todas as subnets da VPC default)
         │
-aws_db_instance (postgres 16, db.t3.micro, 20GB)
+        ├── aws_db_instance.this              (OS Service - postgres 16, db.t3.micro, 20GB)
+        ├── aws_db_instance.service["billing"]  (Billing - mesma config, privado)
+        └── aws_db_instance.service["execucao"] (Execução - mesma config, privado)
         │
-security group: 5432 liberado para a VPC inteira (uso futuro por EKS/Lambda)
-        │        + IP do operador, so durante a carga inicial (ver abaixo)
+security group (compartilhado): 5432 liberado para a VPC inteira (EKS/Lambda)
+        │        + IP do operador, so durante a carga inicial do OS Service (ver abaixo)
         │
-aws_ssm_parameter "/castor-garage/database-url" (SecureString)
+aws_ssm_parameter (SecureString)
+   /castor-garage/database-url            (+ -staging)
+   /castor-garage/billing/database-url    (+ -staging)
+   /castor-garage/execucao/database-url   (+ -staging)
+
+aws_dynamodb_table "castor-garage-billing-payment-attempts" (PAY_PER_REQUEST)
+        │
+aws_ssm_parameter "/castor-garage/billing/payment-attempts-table" (String)
 ```
+
+## Bancos dos microsserviços (Fase 4)
+
+Cada microsserviço tem banco próprio e nenhum acessa o banco de outro
+(RFC 0004 e ADR 0006 em
+[`mecanica-pos-SOAT/docs`](https://github.com/Castor-Garage/mecanica-pos-SOAT/tree/main/docs)):
+
+| Serviço | Banco | Recurso | Parâmetro SSM |
+|---|---|---|---|
+| OS Service | PostgreSQL | `aws_db_instance.this` (`main.tf`) | `/castor-garage/database-url` |
+| Billing | PostgreSQL (`Quote`, `Payment`) | `aws_db_instance.service["billing"]` (`services.tf`) | `/castor-garage/billing/database-url` |
+| Billing | DynamoDB (`PaymentAttempt`) | `aws_dynamodb_table.payment_attempts` (`dynamodb.tf`) | `/castor-garage/billing/payment-attempts-table` |
+| Execução | PostgreSQL (`ExecutionQueueItem`) | `aws_db_instance.service["execucao"]` (`services.tf`) | `/castor-garage/execucao/database-url` |
+
+Os parâmetros `.../database-url-staging` apontam para um database separado
+dentro da mesma instância, igual ao padrão do OS Service.
+
+**Por que os RDS novos já nascem privados** (`publicly_accessible = false`):
+diferente do OS Service, não há carga inicial a partir de um laptop. As
+migrations rodam de dentro do cluster EKS, no start do container de cada
+serviço (`prisma migrate deploy` no `CMD` do Dockerfile).
+
+**Por que DynamoDB e não MongoDB** (a RFC 0004 deixou as duas opções em
+aberto): é gerenciado nativo na mesma conta do AWS Academy, sem cluster
+para provisionar nem connection string com senha. Os pods acessam pela
+LabRole dos nodes do EKS (via IMDS), o mesmo mecanismo usado para as filas
+SQS. Em modo `PAY_PER_REQUEST` o custo no volume de demonstração é
+praticamente zero.
+
+Esquema da tabela `castor-garage-billing-payment-attempts`:
+
+| Atributo | Tipo | Papel |
+|---|---|---|
+| `paymentId` | String | Partition key: `Payment.id` do Billing (o `external_reference` que volta do Mercado Pago) |
+| `receivedAt` | String (ISO-8601) | Sort key: momento em que a notificação chegou |
+
+Os demais atributos (payload cru do webhook, status retornado pela
+consulta ao Mercado Pago etc.) são livres, sem schema fixo.
 
 ## Monitoramento (New Relic)
 
@@ -57,6 +111,11 @@ Verificar depois do apply:
 ```bash
 terraform output -raw newrelic_check_command | bash
 ```
+
+Por enquanto o `nri-postgresql` monitora só o RDS do OS Service. Os RDS do
+Billing e do Execução ainda não estão nele: por ora, a visibilidade desses
+bancos vem do APM da New Relic de cada serviço (queries lentas, erros de
+conexão).
 
 ## Pré-requisitos
 
@@ -136,6 +195,9 @@ terraform apply
 | `ssm_parameter_name` | `/castor-garage/database-url` — lido pela Lambda e pelo deploy da API principal |
 | `security_group_id` | para liberar acesso de outro security group (ex.: nós do EKS), se no futuro trocarmos o ingress por CIDR por uma referência direta |
 | `newrelic_check_command` | comando `kubectl` para conferir se o pod de monitoramento do RDS está rodando |
+| `service_db_endpoints` | host:porta do RDS do Billing e do Execução |
+| `service_ssm_parameter_names` | nomes dos parâmetros SSM com a `DATABASE_URL` (produção e staging) de cada serviço |
+| `payment_attempts_table_name` | nome da tabela DynamoDB do Billing |
 
 ## Destruir
 
