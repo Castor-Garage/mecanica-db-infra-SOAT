@@ -141,7 +141,7 @@ curl -s https://checkip.amazonaws.com
 # 2. aplicar liberando esse IP no security group
 export TF_VAR_operator_cidr="<seu-ip>/32"
 export TF_VAR_new_relic_license_key="<sua-license-key-ingest>"
-terraform init
+terraform init -backend-config="bucket=castor-garage-tfstate-$(aws sts get-caller-identity --query Account --output text)"
 terraform apply
 
 # 3. pegar a DATABASE_URL (ou ler direto do SSM)
@@ -173,11 +173,16 @@ repositório: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 atualizada sempre que a sessão do Lab expirar) e `NEW_RELIC_LICENSE_KEY`
 (License key - INGEST - da conta New Relic, usada pelo pod nri-postgresql).
 
+O state fica no bucket `castor-garage-tfstate-<account-id>`, com o ID da
+conta AWS das credenciais em uso, para o mesmo código servir à conta do
+Academy de qualquer integrante. O pipeline cria esse bucket (com
+versionamento) se ele ainda não existir na conta.
+
 Manualmente:
 
 ```bash
 export TF_VAR_new_relic_license_key="<sua-license-key-ingest>"
-terraform init
+terraform init -backend-config="bucket=castor-garage-tfstate-$(aws sts get-caller-identity --query Account --output text)"
 terraform plan
 terraform apply
 ```
